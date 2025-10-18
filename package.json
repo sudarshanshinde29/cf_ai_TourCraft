@@ -18,6 +18,8 @@
 	"dependencies": {
 		"@cloudflare/agents": "^0.0.16",
 		"@cloudflare/ai": "^1.2.2",
-		"agents": "^0.2.14"
+		"agents": "^0.2.14",
+		"ai": "^5.0.76",
+		"workers-ai-provider": "^2.0.0"
 	}
 }
