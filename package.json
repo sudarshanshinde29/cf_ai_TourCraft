@@ -1,0 +1,23 @@
+{
+	"name": "tourcraft",
+	"version": "0.0.0",
+	"private": true,
+	"scripts": {
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev",
+		"start": "wrangler dev",
+		"test": "vitest",
+		"cf-typegen": "wrangler types"
+	},
+	"devDependencies": {
+		"@cloudflare/vitest-pool-workers": "^0.8.19",
+		"typescript": "^5.5.2",
+		"vitest": "~3.2.0",
+		"wrangler": "^4.43.0"
+	},
+	"dependencies": {
+		"@cloudflare/agents": "^0.0.16",
+		"@cloudflare/ai": "^1.2.2",
+		"agents": "^0.2.14"
+	}
+}
