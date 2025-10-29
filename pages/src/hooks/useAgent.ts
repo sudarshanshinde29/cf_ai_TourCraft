@@ -11,6 +11,11 @@ export interface AgentMessage {
   type: 'user' | 'agent';
   content: string;
   timestamp: Date;
+  toolEvent?: {
+    name: string;
+    callId?: string;
+    outputPreview?: string;
+  };
 }
 
 export interface AgentState {
@@ -53,21 +58,54 @@ export const useAgent = (workerUrl?: string): UseAgentReturn => {
 
   // Convert agent messages to our format
   // agentMessages is an array of UIMessage objects
-  const convertedMessages: AgentMessage[] = Array.isArray(agentMessages) 
+  const convertedMessages: AgentMessage[] = Array.isArray(agentMessages)
     ? agentMessages.map((msg: any) => {
-        // Extract content from different message formats
+        // Extract content from different message formats, including tool outputs
         let content = '';
-        if (msg.parts && Array.isArray(msg.parts)) {
-          content = msg.parts.find((part: any) => part.type === 'text')?.text || '';
+        let toolEvent: AgentMessage['toolEvent'] | undefined;
+        if (Array.isArray(msg.parts)) {
+          // Find any tool-related part first so we can render a tool chip even if assistant text exists
+          const toolPart = msg.parts.find((p: any) =>
+            p && (p.type === 'tool-result' || p.type === 'tool-output' || p.type === 'tool-output-available')
+          );
+          if (toolPart) {
+            try {
+              const derived =
+                typeof toolPart.text === 'string'
+                  ? toolPart.text
+                  : typeof toolPart.output === 'string'
+                    ? toolPart.output
+                    : toolPart.output && typeof toolPart.output.text === 'string'
+                      ? toolPart.output.text
+                      : '';
+              const name = toolPart.toolName || toolPart.name || 'tool';
+              const callId = toolPart.toolCallId || toolPart.id;
+              const preview = derived ? String(derived).slice(0, 120) : undefined;
+              toolEvent = { name, callId, outputPreview: preview };
+              // If we have no other content, use the derived tool text as content
+              if (!content && derived) content = derived;
+            } catch {}
+          }
+
+          // Prefer assistant plain text for the bubble text, but keep toolEvent if present
+          const textPart = msg.parts.find((p: any) => p?.type === 'text' && typeof p.text === 'string');
+          if (textPart) content = textPart.text || content;
+
+          // 3) Last resort: look for any part object with a 'text' field
+          if (!content) {
+            const anyText = msg.parts.find((p: any) => p && typeof p.text === 'string');
+            if (anyText) content = anyText.text;
+          }
         } else if (msg.content) {
           content = msg.content;
         }
-        
+
         return {
           id: msg.id || `msg_${Date.now()}_${msg.role}`,
           type: msg.role === 'user' ? 'user' : 'agent',
-          content: content,
+          content,
           timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+          toolEvent
         };
       })
     : [];

@@ -16,6 +16,7 @@
 		"wrangler": "^4.43.0"
 	},
 	"dependencies": {
+		"@ai-sdk/openai": "^2.0.57",
 		"@cloudflare/agents": "^0.0.16",
 		"@cloudflare/ai": "^1.2.2",
 		"agents": "^0.2.14",

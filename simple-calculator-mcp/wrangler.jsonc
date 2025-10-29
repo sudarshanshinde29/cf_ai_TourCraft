@@ -1,0 +1,23 @@
+{
+  "name": "simple-calculator-mcp-server",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-02-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MCP_OBJECT",
+        "class_name": "SimpleCalculatorMCP"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["SimpleCalculatorMCP"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

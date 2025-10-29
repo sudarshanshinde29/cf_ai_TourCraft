@@ -99,7 +99,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ workerUrl }) => {
           state.messages.map((message) => (
             <div key={message.id} className={`message ${message.type}`}>
               <div className="message-content">
-                <div className="message-text">{message.content}</div>
+                {message.toolEvent ? (
+                  <div className="message-text">
+                    <div className="tool-chip">🔧 {message.toolEvent.name}</div>
+                    <div>{message.content}</div>
+                  </div>
+                ) : (
+                  <div className="message-text">{message.content}</div>
+                )}
                 <div className="message-time">{formatTime(message.timestamp)}</div>
               </div>
             </div>
