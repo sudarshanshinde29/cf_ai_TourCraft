@@ -35,6 +35,7 @@ export interface UseAgentReturn {
 
 export const useAgent = (workerUrl?: string): UseAgentReturn => {
   const [error, setError] = useState<string | null>(null);
+  // No tool-call heuristics; keep UI simple and text-focused
 
   // Use the agents/react hook to connect to our ChatAgent
   const agent = useAgentHook({
@@ -64,7 +65,7 @@ export const useAgent = (workerUrl?: string): UseAgentReturn => {
         let content = '';
         let toolEvent: AgentMessage['toolEvent'] | undefined;
         if (Array.isArray(msg.parts)) {
-          // Find any tool-related part first so we can render a tool chip even if assistant text exists
+          // 1) Capture a structured tool part (final output variants only)
           const toolPart = msg.parts.find((p: any) =>
             p && (p.type === 'tool-result' || p.type === 'tool-output' || p.type === 'tool-output-available')
           );
@@ -80,24 +81,49 @@ export const useAgent = (workerUrl?: string): UseAgentReturn => {
                       : '';
               const name = toolPart.toolName || toolPart.name || 'tool';
               const callId = toolPart.toolCallId || toolPart.id;
-              const preview = derived ? String(derived).slice(0, 120) : undefined;
+              const preview = derived ? String(derived).slice(0, 160) : undefined;
               toolEvent = { name, callId, outputPreview: preview };
-              // If we have no other content, use the derived tool text as content
               if (!content && derived) content = derived;
             } catch {}
           }
 
-          // Prefer assistant plain text for the bubble text, but keep toolEvent if present
+          // 2) Prefer assistant plain text for the bubble text
           const textPart = msg.parts.find((p: any) => p?.type === 'text' && typeof p.text === 'string');
           if (textPart) content = textPart.text || content;
 
-          // 3) Last resort: look for any part object with a 'text' field
+          // 3) Last resort: any part with a text field
           if (!content) {
             const anyText = msg.parts.find((p: any) => p && typeof p.text === 'string');
             if (anyText) content = anyText.text;
           }
         } else if (msg.content) {
           content = msg.content;
+        }
+
+        // Music-specific heuristic: if no toolEvent but content looks like music MCP output, tag it
+        if (!toolEvent && typeof content === 'string') {
+          const lower = content.toLowerCase();
+          const looksLikeStatus =
+            lower.includes('music trends mcp server status') ||
+            lower.startsWith('🎵 music trends mcp server status');
+          const looksLikeAnalysis =
+            lower.includes('global music trends analysis') ||
+            lower.includes('music market analysis') ||
+            lower.includes('trends in') ||
+            lower.startsWith('🎵');
+          if (looksLikeStatus) {
+            toolEvent = {
+              name: 'get_server_status',
+              callId: undefined,
+              outputPreview: content.slice(0, 120)
+            };
+          } else if (looksLikeAnalysis) {
+            toolEvent = {
+              name: 'analyze_music_trends',
+              callId: undefined,
+              outputPreview: content.slice(0, 120)
+            };
+          }
         }
 
         return {

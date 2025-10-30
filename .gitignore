@@ -23,6 +23,7 @@ _.seed
 
 lib-cov
 
+
 # Coverage directory used by tools like istanbul
 
 coverage
@@ -166,11 +167,6 @@ dist
 !.env.example
 .wrangler/
 
-
-/plan.md
-/.cursor/**
-/.cursor/agents.mdc
-/.cursor/cloudflare.mdc
 
 /node_modules/**
 **/.wrangler/**

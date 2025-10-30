@@ -1,0 +1,21 @@
+{
+  "name": "music-trends-mcp-server",
+  "version": "1.0.0",
+  "description": "Music Trends MCP Server for TourCraft",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "wrangler dev --test"
+  },
+  "dependencies": {
+    "agents": "latest",
+    "@modelcontextprotocol/sdk": "latest",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "typescript": "^5.0.0",
+    "wrangler": "^3.0.0"
+  }
+}

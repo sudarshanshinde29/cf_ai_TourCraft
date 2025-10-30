@@ -12,6 +12,7 @@ export interface Env {
   ChatAgent: DurableObjectNamespace;
   HOST?: string; // Optional host for callback URLs
   OPENAI_API_KEY?: string; // Optional OpenAI key for direct OpenAI tool-calling tests
+  MUSIC_TRENDS_MCP_URL?: string; // Optional MCP base URL (e.g., https://music-trends...workers.dev)
 }
 
 // Chat Agent class extending AIChatAgent from agents package
@@ -26,7 +27,7 @@ export class ChatAgent extends AIChatAgent<Env> {
 
 
         /**
-         * Initialize MCP client and connect to Simple Calculator MCP server
+         * Initialize MCP client and connect to Music Trends MCP server
          */
         async onStart() {
           try {
@@ -110,7 +111,7 @@ export class ChatAgent extends AIChatAgent<Env> {
             await new Promise(resolve => setTimeout(resolve, 1000));
             
             // Health-check gate: ensure MCP server is reachable before connect
-            const mcpUrl = "http://localhost:9000";
+            const mcpUrl = this.env.MUSIC_TRENDS_MCP_URL || "http://localhost:9000";
             const sseUrl = `${mcpUrl}/sse`;
             try {
               const healthResp = await fetch(`${mcpUrl}/health`).catch(() => undefined);
@@ -122,9 +123,9 @@ export class ChatAgent extends AIChatAgent<Env> {
             }
 
             // Create a fresh connection
-            console.log("🔌 Creating fresh calculator connection...");
+            console.log("🔌 Creating fresh music-trends connection...");
             const { id, authUrl } = await this.addMcpServer(
-              "calculator",
+              "music-trends",
               sseUrl,
               this.env.HOST || "http://localhost:8787" // callbackHost required
             );
@@ -151,12 +152,12 @@ export class ChatAgent extends AIChatAgent<Env> {
               }
 
               if (Object.keys(tools).length > 0 && connectGen === this.mcpConnectGeneration) {
-                console.log("✅ Connected to Simple Calculator MCP server:", id);
-                console.log("🧮 MCP tools available:", Object.keys(tools));
+                console.log("✅ Connected to Music Trends MCP server:", id);
+                console.log("🎵 MCP tools available:", Object.keys(tools));
               } else {
                 // Ensure tools reflect empty on failure
                 console.warn("⚠️ MCP connected but no tools discovered within timeout; marking as not ready");
-                console.log("🧮 MCP tools available:", []);
+                console.log("🎵 MCP tools available:", []);
               }
             }
           } catch (error) {
@@ -173,6 +174,8 @@ export class ChatAgent extends AIChatAgent<Env> {
     onFinish: StreamTextOnFinishCallback<ToolSet>,
     _options?: { abortSignal?: AbortSignal }
   ) {
+    const self = this;
+    const signal = _options?.abortSignal;
     // Initialize the model with the environment
     // Prefer OpenAI (tool-calling capable) when API key is present; otherwise fallback to Workers AI
     let model: any;
@@ -181,26 +184,15 @@ export class ChatAgent extends AIChatAgent<Env> {
       model = openai("gpt-4o-mini");
       console.log("🧠 Using OpenAI model: gpt-4o-mini");
     } else {
-      // const workersai = createWorkersAI({ binding: this.env.AI });
-      // // Previous defaults (kept for rollback/reference):
-      // // const model = workersai("@cf/meta/llama-3-8b-instruct");
-      // // const model = workersai("@cf/deepseek-ai/deepseek-r1-distill-qwen-32b");
-      // model = workersai("@cf/meta/llama-3-8b-instruct");
+      const workersai = createWorkersAI({ binding: this.env.AI });
+      model = workersai("@cf/meta/llama-3-8b-instruct");
       console.log("🧠 Using Workers AI model: @cf/meta/llama-3-8b-instruct");
     }
 
-    // Collect all MCP-provided tools
+    // Collect all MCP-provided tools (Music Trends server)
     const allTools = this.mcp.getAITools();
-
-    // Locate MCP-provided tools once
-    const addKey = Object.keys(allTools).find((k) => /(^|_)add$/.test(k));
-    const multiplyKey = Object.keys(allTools).find((k) => /(^|_)multiply$/.test(k));
-    const mcpAdd = addKey ? (allTools as any)[addKey] : undefined;
-    const mcpMultiply = multiplyKey ? (allTools as any)[multiplyKey] : undefined;
-
     console.log("MCP Client status:", "connected");
     console.log("Underlying MCP tool keys:", Object.keys(allTools));
-    console.log("🔗 Tool key mapping:", { add: addKey, multiply: multiplyKey });
 
     // Simple cleanup hook: return only defined parts/messages to avoid invalid states
     function cleanupMessages(messages: any[]) {
@@ -213,7 +205,7 @@ export class ChatAgent extends AIChatAgent<Env> {
     // Minimal processToolCalls stub (single-pass): we rely on the AI SDK to execute tools
     // during this request; this hook exists to align with the documented pipeline and
     // to handle any pre-existing pending tool calls in messages if needed in future.
-    async function processToolCalls({ messages, writer }: { messages: any[]; writer: any }) {
+    async function processToolCalls({ messages, writer, signal }: { messages: any[]; writer: any; signal?: AbortSignal }) {
       const processedMessages = await Promise.all(
         (messages || []).map(async (message) => {
           const parts = message?.parts;
@@ -225,13 +217,27 @@ export class ChatAgent extends AIChatAgent<Env> {
               // Only emit when tool output is available
               if (part.state !== "output-available") return part;
 
+              if (signal?.aborted) return part;
               // Forward updated tool result to client as a structured event
               try {
+                const pAny = part as any;
+                const toolName = pAny.toolName || pAny.name || (typeof part.type === 'string' && part.type.startsWith('tool-') ? (part.type as string).slice(5) : undefined) || 'tool';
+                // Emit enhanced tool-output-available
                 writer?.write?.({
                   type: "tool-output-available",
                   toolCallId: part.toolCallId,
-                  output: part.output
+                  output: part.output,
+                  toolName
                 });
+              } catch {}
+
+              // Record minimal tool-call metadata in durable state for history/debug
+              try {
+                const prior = (self as any).state?.toolCalls || [];
+                const pAny = part as any;
+                const next = [...prior, { toolName: pAny.toolName || pAny.name || 'tool', toolCallId: part.toolCallId, ts: Date.now() }];
+                // @ts-ignore setState provided by base Agent
+                self.setState?.({ ...(self as any).state, toolCalls: next });
               } catch {}
 
               // Return updated part unchanged (already has output)
@@ -248,10 +254,11 @@ export class ChatAgent extends AIChatAgent<Env> {
 
     const stream = createUIMessageStream({
       execute: async ({ writer }) => {
+        if (signal?.aborted) return;
         // 1) Normalize message history
         const cleaned = cleanupMessages(this.messages);
         // 2) Resolve any pending tool calls from prior turns and stream their outputs
-        const processed = await processToolCalls({ messages: cleaned, writer });
+        const processed = await processToolCalls({ messages: cleaned, writer, signal });
 
         // Mirror friend's pattern: pass SDK-provided tools (including MCP) straight through
         const allTools = {
@@ -259,20 +266,24 @@ export class ChatAgent extends AIChatAgent<Env> {
         } as ToolSet;
 
         const result = streamText({
-          system: `You are a helpful assistant with access to calculator tools.
+          system: `You are a helpful assistant with access to Music Trends analysis tools.
 
-When users ask for mathematical calculations, you MUST use the available calculator tools to provide accurate results.
+When users ask about music trends, tour planning, or market insights, use the available tools to analyze and summarize results.
 
 Available tools:
-- add: Add two numbers together
-- multiply: Multiply two numbers together
+- analyze_music_trends: Analyze current music trends by optional genre, location, and timePeriod (week|month|year).
+- get_server_status: Check the health/status of the Music Trends MCP server.
 
-Rules for tool usage:
-- Call at most ONE tool per user request, then produce a final assistant message.
-- Do NOT repeat the same tool call multiple times in the same turn.
-- After the tool result is available, summarize the result clearly as assistant text.
+Guidelines:
+- Call at most ONE tool per user request, then provide a concise assistant summary.
+- Only call a tool if it will materially improve your answer.
+- If user asks for "status" or similar, prefer get_server_status.
+- If user asks about a specific genre and/or location, prefer analyze_music_trends and pass the inferred parameters.
 
-Example: If user asks "What is 5 + 3?", call the add tool with a=5 and b=3, then respond with the result as assistant text.`,
+Examples:
+- "Analyze hip-hop in New York" -> call analyze_music_trends({ genre: "hip-hop", location: "New York" })
+- "What genres are trending globally?" -> call analyze_music_trends({})
+- "Status of your data" -> call get_server_status({})`,
 
           messages: convertToModelMessages(processed),
           model,
@@ -280,10 +291,14 @@ Example: If user asks "What is 5 + 3?", call the add tool with a=5 and b=3, then
           toolChoice: "auto",
           // Encourage at most one tool call; stop earlier to avoid repeats
           stopWhen: stepCountIs(4),
+          // Cancel generation/tool streaming if client disconnects
+          abortSignal: signal,
           onFinish: onFinish as unknown as StreamTextOnFinishCallback<ToolSet>,
         });
 
-        writer.merge(result.toUIMessageStream());
+        if (!signal?.aborted) {
+          writer.merge(result.toUIMessageStream());
+        }
       }
     });
 

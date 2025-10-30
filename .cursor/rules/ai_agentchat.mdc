@@ -1,0 +1,633 @@
+---
+description: AI Agent Chat Integration with Cloudflare Agents Package
+globs: 
+alwaysApply: false
+---
+<system_context>
+You are an advanced assistant specialized in implementing AI-powered chat agents using the Cloudflare agents package. You have deep knowledge of AIChatAgent, WebSocket communication, AI SDK integration, and React frontend patterns.
+</system_context>
+
+<behavior_guidelines>
+
+- Respond in a friendly and concise manner
+- Focus exclusively on AI agent chat solutions using Cloudflare agents package
+- Provide complete, self-contained solutions
+- Default to current best practices for AIChatAgent implementation
+- Ask clarifying questions when requirements are ambiguous
+- Always use the proper AI SDK approach with streamText, createUIMessageStream, and convertToModelMessages
+
+</behavior_guidelines>
+
+<code_standards>
+
+- Generate code in TypeScript by default unless JavaScript is specifically requested
+- Use ES modules format exclusively
+- Extend AIChatAgent<Env> from "agents/ai-chat-agent" for AI chat functionality
+- Use useAgent from "agents/react" and useAgentChat from "agents/ai-react" for frontend integration
+- Always use routeAgentRequest for proper agent routing
+- Implement proper WebSocket handling with status 101 responses
+- Include CORS headers for cross-origin requests
+- Use createWorkersAI and streamText instead of direct AI API calls
+- Follow Cloudflare Workers security best practices
+- Never bake in secrets into the code
+- Include proper error handling and logging
+- Add appropriate TypeScript types and interfaces
+- Include comments explaining complex logic
+
+</code_standards>
+
+<output_format>
+
+- Use markdown code blocks to separate code from explanations
+- Provide separate blocks for:
+  1. Backend agent implementation (index.ts)
+  2. Frontend React hooks (useAgent.ts)
+  3. Configuration (wrangler.jsonc)
+  4. Type definitions (worker-configuration.d.ts)
+  5. Example usage and troubleshooting
+- Always output complete files, never partial updates or diffs
+- Format code consistently using standard TypeScript/JavaScript conventions
+
+</output_format>
+
+<ai_agent_integrations>
+
+- When AI chat functionality is needed, integrate with AIChatAgent:
+  - Extend AIChatAgent<Env> from "agents/ai-chat-agent"
+  - Implement onChatMessage method with proper AI SDK usage
+  - Use streamText, createUIMessageStream, convertToModelMessages, createUIMessageStreamResponse
+  - Initialize model with createWorkersAI({ binding: env.AI })
+  - Handle WebSocket upgrades with status 101 responses
+  - Use routeAgentRequest for proper agent routing
+
+- When frontend integration is needed, use agents React hooks:
+  - Use useAgent from "agents/react" for agent connection
+  - Use useAgentChat from "agents/ai-react" for AI chat logic
+  - Handle message format conversion between frontend and backend
+  - Implement proper error handling and connection management
+  - Use moduleResolution: "bundler" in tsconfig.json
+
+- When WebSocket communication is needed:
+  - Handle WebSocket upgrades (status 101) properly
+  - Add CORS headers to HTTP responses only
+  - Use proper agent routing with routeAgentRequest
+  - Monitor connection status and handle reconnections
+
+</ai_agent_integrations>
+
+<common_patterns>
+
+<backend_agent_setup>
+```typescript
+import { AIChatAgent } from "agents/ai-chat-agent";
+import { StreamTextOnFinishCallback, ToolSet, streamText, createUIMessageStream, convertToModelMessages, createUIMessageStreamResponse } from "ai";
+import { createWorkersAI } from 'workers-ai-provider';
+import { routeAgentRequest } from "agents";
+
+export interface Env {
+  AI: any;
+  ChatAgent: DurableObjectNamespace;
+}
+
+export class ChatAgent extends AIChatAgent<Env> {
+  constructor(state: DurableObjectState, env: Env) {
+    super(state, env);
+  }
+
+  async onChatMessage(
+    onFinish: StreamTextOnFinishCallback<ToolSet>,
+    _options?: { abortSignal?: AbortSignal }
+  ) {
+    const workersai = createWorkersAI({ binding: this.env.AI });
+    const model = workersai("@cf/meta/llama-3-8b-instruct");
+
+    const stream = createUIMessageStream({
+      execute: async ({ writer }) => {
+        const result = streamText({
+          system: `You are TourCraft, an AI assistant specialized in helping music managers and artists plan tours.`,
+          messages: convertToModelMessages(this.messages),
+          model,
+          onFinish: onFinish as unknown as StreamTextOnFinishCallback<{}>,
+        });
+
+        writer.merge(result.toUIMessageStream());
+      }
+    });
+
+    return createUIMessageStreamResponse({ stream });
+  }
+}
+```
+
+<worker_entry_point>
+```typescript
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    
+    const corsHeaders = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    };
+    
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { 
+        status: 200, 
+        headers: corsHeaders 
+      });
+    }
+    
+    if (url.pathname.startsWith('/agents/')) {
+      try {
+        const response = await routeAgentRequest(request, env);
+        
+        if (response && response.status === 101) {
+          return response;
+        }
+        
+        if (response) {
+          const newHeaders = new Headers(response.headers);
+          Object.entries(corsHeaders).forEach(([key, value]) => {
+            newHeaders.set(key, value);
+          });
+          
+          return new Response(response.body, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: newHeaders
+          });
+        }
+        
+        return Response.json({ error: 'No response from agent' }, { 
+          status: 500, 
+          headers: corsHeaders 
+        });
+      } catch (error) {
+        console.error('Agent routing error:', error);
+        return Response.json({ error: 'Agent routing failed' }, { 
+          status: 500, 
+          headers: corsHeaders 
+        });
+      }
+    }
+    
+    return Response.json({ msg: 'no agent here' }, { 
+      status: 404, 
+      headers: corsHeaders 
+    });
+  },
+} satisfies ExportedHandler<Env>;
+```
+
+<frontend_hook>
+```typescript
+import { useState, useCallback } from 'react';
+import { useAgent as useAgentHook } from 'agents/react';
+import { useAgentChat } from 'agents/ai-react';
+import type { UIMessage } from '@ai-sdk/react';
+
+export interface AgentMessage {
+  id: string;
+  type: 'user' | 'agent';
+  content: string;
+  timestamp: Date;
+}
+
+export interface AgentState {
+  isConnected: boolean;
+  isConnecting: boolean;
+  messages: AgentMessage[];
+  error: string | null;
+}
+
+export interface UseAgentReturn {
+  state: AgentState;
+  sendMessage: (content: string) => void;
+  connect: () => void;
+  disconnect: () => void;
+  clearMessages: () => void;
+}
+
+export const useAgent = (workerUrl?: string): UseAgentReturn => {
+  const [error, setError] = useState<string | null>(null);
+
+  const agent = useAgentHook({
+    agent: "ChatAgent",
+    name: "tourcraft-chat",
+    host: workerUrl || (window.location.hostname === 'localhost' 
+      ? 'localhost:8787' 
+      : 'tourcraft.sshinde5.workers.dev'),
+  });
+
+  const {
+    messages: agentMessages,
+    clearHistory,
+    status,
+    sendMessage: sendAgentMessage,
+    stop
+  } = useAgentChat<unknown, UIMessage<{ createdAt: string }>>({
+    agent
+  });
+
+  const convertedMessages: AgentMessage[] = Array.isArray(agentMessages) 
+    ? agentMessages.map((msg: any) => {
+        let content = '';
+        if (msg.parts && Array.isArray(msg.parts)) {
+          content = msg.parts.find((part: any) => part.type === 'text')?.text || '';
+        } else if (msg.content) {
+          content = msg.content;
+        }
+        
+        return {
+          id: msg.id || `msg_${Date.now()}_${msg.role}`,
+          type: msg.role === 'user' ? 'user' : 'agent',
+          content: content,
+          timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+        };
+      })
+    : [];
+
+  const connect = useCallback(async () => {
+    try {
+      setError(null);
+    } catch (error) {
+      console.error('Error connecting to agent:', error);
+      setError('Failed to connect to agent');
+    }
+  }, []);
+
+  const disconnect = useCallback(() => {
+    try {
+      stop();
+    } catch (error) {
+      console.error('Error disconnecting from agent:', error);
+    }
+  }, [stop]);
+
+  const sendMessage = useCallback(async (content: string) => {
+    try {
+      await sendAgentMessage({
+        role: "user",
+        parts: [{ type: "text", text: content }]
+      });
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setError('Failed to send message');
+    }
+  }, [sendAgentMessage]);
+
+  const clearMessages = useCallback(() => {
+    clearHistory();
+  }, [clearHistory]);
+
+  const state: AgentState = {
+    isConnected: (status as any) !== 'idle',
+    isConnecting: (status as any) === 'loading',
+    messages: convertedMessages,
+    error,
+  };
+
+  return {
+    state,
+    sendMessage,
+    connect,
+    disconnect,
+    clearMessages,
+  };
+};
+```
+
+<wrangler_configuration>
+```jsonc
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tourcraft",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-02-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "ai": {
+    "binding": "AI",
+    "remote": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ChatAgent",
+        "class_name": "ChatAgent"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ChatAgent"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
+```
+
+<typescript_configuration>
+```json
+{
+  "compilerOptions": {
+    "target": "es5",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx"
+  },
+  "include": ["src"]
+}
+```
+
+</common_patterns>
+
+<troubleshooting_guide>
+
+<websocket_connection_issues>
+**Problem**: WebSocket connection fails with "WebSocket is closed before the connection is established"
+
+**Solution**: Ensure proper agent routing and CORS headers:
+- Use routeAgentRequest for proper WebSocket handling
+- Return WebSocket responses (status 101) as-is
+- Add CORS headers only to HTTP responses
+
+**Code Fix**:
+```typescript
+const response = await routeAgentRequest(request, env);
+if (response && response.status === 101) {
+  return response; // Return WebSocket upgrade as-is
+}
+```
+
+</websocket_connection_issues>
+
+<ai_api_format_errors>
+**Problem**: "Error: oneOf at '/' not met, 0 matches: required properties at '/' are 'prompt'"
+
+**Solution**: Use the proper AI SDK approach instead of direct AI API calls:
+- Use streamText instead of env.AI.run()
+- Use createUIMessageStream for proper message handling
+- Use convertToModelMessages for message format conversion
+
+**Code Fix**:
+```typescript
+// ❌ Wrong approach
+const response = await this.env.AI.run('@cf/meta/llama-3-8b-instruct', {
+  messages: [...], // Wrong format
+});
+
+// ✅ Correct approach
+const result = streamText({
+  system: "You are a helpful assistant...",
+  messages: convertToModelMessages(this.messages),
+  model: workersai("@cf/meta/llama-3-8b-instruct"),
+});
+```
+
+</ai_api_format_errors>
+
+<message_display_issues>
+**Problem**: Messages not appearing in frontend
+
+**Solution**: Proper message format conversion:
+- Handle different message structures (parts vs content)
+- Ensure agentMessages is an array before mapping
+- Convert between frontend and backend formats properly
+
+**Code Fix**:
+```typescript
+const convertedMessages: AgentMessage[] = Array.isArray(agentMessages) 
+  ? agentMessages.map((msg: any) => {
+      let content = '';
+      if (msg.parts && Array.isArray(msg.parts)) {
+        content = msg.parts.find((part: any) => part.type === 'text')?.text || '';
+      } else if (msg.content) {
+        content = msg.content;
+      }
+      
+      return {
+        id: msg.id || `msg_${Date.now()}_${msg.role}`,
+        type: msg.role === 'user' ? 'user' : 'agent',
+        content: content,
+        timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+      };
+    })
+  : [];
+```
+
+</message_display_issues>
+
+<typescript_errors>
+**Problem**: "Property 'messages' does not exist on type 'UIMessage[]'"
+
+**Solution**: Use proper type assertions and safety checks:
+- Use Array.isArray() to check if agentMessages is an array
+- Use type assertions (as any) for dynamic content
+- Handle undefined/null cases properly
+
+**Code Fix**:
+```typescript
+const convertedMessages: AgentMessage[] = Array.isArray(agentMessages) 
+  ? agentMessages.map((msg: any) => ({ /* convert format */ }))
+  : [];
+```
+
+</typescript_errors>
+
+</troubleshooting_guide>
+
+<best_practices>
+
+<ai_sdk_integration>
+- Always use streamText, createUIMessageStream, and convertToModelMessages
+- Never call AI APIs directly with env.AI.run()
+- Use createWorkersAI for model initialization
+- Handle onFinish callbacks properly with type assertions
+
+</ai_sdk_integration>
+
+<websocket_handling>
+- Return WebSocket responses (status 101) as-is
+- Add CORS headers only to HTTP responses
+- Use routeAgentRequest for proper agent routing
+- Monitor connection status and handle failures gracefully
+
+</websocket_handling>
+
+<error_handling>
+- Wrap agent operations in try-catch blocks
+- Provide meaningful error messages
+- Handle connection failures gracefully
+- Log errors for debugging purposes
+
+</error_handling>
+
+<message_format_consistency>
+- Handle different message formats (parts vs content)
+- Preserve message IDs and timestamps
+- Convert between frontend and backend formats properly
+- Use proper type assertions for dynamic content
+
+</message_format_consistency>
+
+<typescript_configuration>
+- Use moduleResolution: "bundler" for proper module resolution
+- Enable strict type checking
+- Use proper type assertions for dynamic content
+- Include necessary type definitions
+
+</typescript_configuration>
+
+<development_workflow>
+- Use wrangler dev for local development
+- Monitor terminal logs for connection status
+- Test both WebSocket and HTTP endpoints
+- Verify CORS headers in browser dev tools
+- Restart server when making significant changes
+
+</development_workflow>
+
+</best_practices>
+
+<advanced_features>
+
+<custom_tools_integration>
+```typescript
+const allTools = {
+  ...tools,
+  ...this.mcp.getAITools()
+};
+
+const result = streamText({
+  system: "You are a helpful assistant...",
+  messages: convertToModelMessages(this.messages),
+  model,
+  tools: allTools,
+  onFinish: onFinish,
+});
+```
+
+</custom_tools_integration>
+
+<scheduled_tasks>
+```typescript
+async executeTask(description: string, _task: Schedule<string>) {
+  await this.saveMessages([
+    ...this.messages,
+    {
+      id: generateId(),
+      role: "user",
+      parts: [{ type: "text", text: `Running scheduled task: ${description}` }],
+      metadata: { createdAt: new Date() }
+    }
+  ]);
+}
+```
+
+</scheduled_tasks>
+
+<state_management>
+```typescript
+// Access agent state
+const messages = this.messages;
+const state = this.state;
+
+// Save messages
+await this.saveMessages(updatedMessages);
+
+// Access SQL database
+const result = await this.sql.prepare("SELECT * FROM messages").all();
+```
+
+</state_management>
+
+</advanced_features>
+
+<common_mistakes>
+
+<direct_ai_api_calls>
+**❌ Don't do this**:
+```typescript
+const response = await this.env.AI.run('@cf/meta/llama-3-8b-instruct', {
+  messages: [...], // Wrong format
+  prompt: "...",   // Wrong format
+});
+```
+
+**✅ Do this instead**:
+```typescript
+const result = streamText({
+  system: "You are a helpful assistant...",
+  messages: convertToModelMessages(this.messages),
+  model: workersai("@cf/meta/llama-3-8b-instruct"),
+});
+```
+
+</direct_ai_api_calls>
+
+<websocket_response_handling>
+**❌ Don't do this**:
+```typescript
+const response = await routeAgentRequest(request, env);
+return new Response(response.body, {
+  status: response.status, // This will fail for status 101
+  headers: corsHeaders
+});
+```
+
+**✅ Do this instead**:
+```typescript
+const response = await routeAgentRequest(request, env);
+if (response && response.status === 101) {
+  return response; // Return WebSocket upgrade as-is
+}
+```
+
+</websocket_response_handling>
+
+<message_format_assumptions>
+**❌ Don't do this**:
+```typescript
+const messages = agentMessages.messages; // Assumes messages property exists
+```
+
+**✅ Do this instead**:
+```typescript
+const convertedMessages: AgentMessage[] = Array.isArray(agentMessages) 
+  ? agentMessages.map((msg: any) => ({ /* convert format */ }))
+  : [];
+```
+
+</message_format_assumptions>
+
+</common_mistakes>
+
+<deployment_checklist>
+
+- [ ] Verify AIChatAgent extends properly from "agents/ai-chat-agent"
+- [ ] Ensure onChatMessage uses proper AI SDK functions
+- [ ] Check WebSocket handling with status 101 responses
+- [ ] Verify CORS headers are added to HTTP responses only
+- [ ] Test useAgent and useAgentChat hooks integration
+- [ ] Verify message format conversion works correctly
+- [ ] Check TypeScript configuration with moduleResolution: "bundler"
+- [ ] Test both local development and production deployment
+- [ ] Verify AI model binding is configured correctly
+- [ ] Check Durable Object bindings in wrangler.jsonc
+
+</deployment_checklist>

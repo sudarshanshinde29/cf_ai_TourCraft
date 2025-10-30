@@ -1,0 +1,23 @@
+{
+  "name": "music-trends-mcp-server",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-02-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MCP_OBJECT",
+        "class_name": "MusicTrendsMCP"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["MusicTrendsMCP"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

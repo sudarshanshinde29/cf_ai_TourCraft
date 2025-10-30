@@ -1,6 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAgent } from '../hooks/useAgent';
 import './ChatInterface.css';
+// Very small markdown renderer for headings, bold, and line breaks
+function renderMarkdown(md: string) {
+  let html = md
+    // Headings ###
+    .replace(/^###\s(.+)$/gm, '<h3>$1</h3>')
+    // Bold **text**
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    // Convert lines to paragraphs (keep existing block tags intact)
+    .split('\n')
+    .map((line) => (line.trim().startsWith('<h3>') ? line : line.trim().length ? `<p>${line}</p>` : ''))
+    .join('');
+  return { __html: html };
+}
+
 
 interface ChatInterfaceProps {
   workerUrl?: string;
@@ -101,11 +115,22 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ workerUrl }) => {
               <div className="message-content">
                 {message.toolEvent ? (
                   <div className="message-text">
-                    <div className="tool-chip">🔧 {message.toolEvent.name}</div>
-                    <div>{message.content}</div>
+                    <div className="tool-inline">
+                      <span className="tool-inline-icon">{
+                        (() => {
+                          const n = (message.toolEvent?.name || '').toLowerCase();
+                          if (n.includes('analyze_music_trends')) return '🎵';
+                          if (n.includes('get_server_status')) return '🩺';
+                          return '🔧';
+                        })()
+                      }</span>
+                      <span className="tool-inline-name">{message.toolEvent.name}</span>
+                      <span className="tool-inline-sub">from MCP</span>
+                    </div>
+                    <div className="message-markdown" dangerouslySetInnerHTML={renderMarkdown(message.content)} />
                   </div>
                 ) : (
-                  <div className="message-text">{message.content}</div>
+                  <div className="message-text message-markdown" dangerouslySetInnerHTML={renderMarkdown(message.content)} />
                 )}
                 <div className="message-time">{formatTime(message.timestamp)}</div>
               </div>

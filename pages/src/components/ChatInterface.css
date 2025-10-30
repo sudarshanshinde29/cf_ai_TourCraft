@@ -193,6 +193,46 @@
   margin-top: 4px;
 }
 
+/* Tool chip + markdown rendering enhancements */
+.tool-chip {
+  background-color: rgba(0,0,0,0.06);
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tool-chip-sub {
+  color: #6b7280;
+  margin-left: 6px;
+}
+.tool-inline {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.tool-inline-icon {
+  font-size: 1.1rem;
+}
+.tool-inline-name {
+  font-weight: 600;
+}
+.tool-inline-sub {
+  color: #6b7280;
+}
+.message-markdown h3 {
+  margin: 0 0 6px 0;
+  font-size: 0.95rem;
+}
+.message-markdown p {
+  margin: 4px 0;
+}
+.message-markdown strong {
+  font-weight: 600;
+}
+
 .message.user .message-time {
   text-align: right;
 }
